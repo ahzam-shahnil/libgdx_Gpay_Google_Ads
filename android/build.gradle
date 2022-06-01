@@ -1,0 +1,189 @@
+android {
+    buildToolsVersion "30.0.2"
+    compileSdkVersion 31
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+
+        release {
+            debuggable false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-project.txt'
+        }
+        dependencies {
+            implementation   'com.google.android.gms:play-services-ads:18.1.1'
+        }
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['src']
+            aidl.srcDirs = ['src']
+            renderscript.srcDirs = ['src']
+            res.srcDirs = ['res']
+            assets.srcDirs = ['assets']
+            jniLibs.srcDirs = ['libs']
+        }
+        amazon {
+            java.srcDirs = ['src-amazon']
+        }
+        huawei {
+            java.srcDirs = ['src-huawei']
+        }
+        google {
+            java.srcDirs = ['src-google']
+            // uncomment if you need some manifest changes just for this flavor
+            // manifest.srcFile 'AndroidManifest-google.xml'
+        }
+    }
+    packagingOptions {
+        exclude 'META-INF/robovm/ios/robovm.xml'
+    }
+    defaultConfig {
+        applicationId "com.badlogic.gdx.pay.app"
+        minSdkVersion 19
+        targetSdkVersion 30
+    }
+
+    flavorDimensions "type"
+    productFlavors {
+        amazon { dimension "type" }
+        google { dimension "type" }
+        huawei {
+            dimension "type"
+            minSdkVersion 19
+        }
+    }
+}
+
+if (getGradle().getStartParameter().getTaskRequests().toString().toLowerCase().contains("huawei")) {
+    apply plugin: 'com.huawei.agconnect'
+}
+
+repositories {
+    maven { url "https://jcenter.bintray.com" }
+    maven { url 'https://developer.huawei.com/repo/' } // HUAWEI Maven repository
+}
+
+dependencies {
+    googleImplementation "com.badlogicgames.gdxpay:gdx-pay-android-googlebilling:$gdxPayVersion"
+    amazonImplementation "com.badlogicgames.gdxpay:gdx-pay-android-amazon:$gdxPayVersion"
+    huaweiImplementation "com.badlogicgames.gdxpay:gdx-pay-android-huawei:$gdxPayVersion"
+
+}
+
+
+// called every time gradle gets executed, takes the native dependencies of
+// the natives configuration, and extracts them to the proper libs/ folders
+// so they get packed with the APK.
+task copyAndroidNatives() {
+    doFirst {
+        file("libs/armeabi/").mkdirs()
+        file("libs/armeabi-v7a/").mkdirs()
+        file("libs/arm64-v8a/").mkdirs()
+        file("libs/x86_64/").mkdirs()
+        file("libs/x86/").mkdirs()
+
+        configurations.natives.files.each { jar ->
+            def outputDir = null
+            if (jar.name.endsWith("natives-arm64-v8a.jar")) outputDir = file("libs/arm64-v8a")
+            if (jar.name.endsWith("natives-armeabi-v7a.jar")) outputDir = file("libs/armeabi-v7a")
+            if (jar.name.endsWith("natives-armeabi.jar")) outputDir = file("libs/armeabi")
+            if (jar.name.endsWith("natives-x86_64.jar")) outputDir = file("libs/x86_64")
+            if (jar.name.endsWith("natives-x86.jar")) outputDir = file("libs/x86")
+            if (outputDir != null) {
+                copy {
+                    from zipTree(jar)
+                    into outputDir
+                    include "*.so"
+                }
+            }
+        }
+    }
+}
+
+tasks.whenTaskAdded { packageTask ->
+    if (packageTask.name.contains("package")) {
+        packageTask.dependsOn 'copyAndroidNatives'
+    }
+}
+
+task run(type: Exec) {
+    def path
+    def localProperties = project.file("../local.properties")
+    if (localProperties.exists()) {
+        Properties properties = new Properties()
+        localProperties.withInputStream { instr ->
+            properties.load(instr)
+        }
+        def sdkDir = properties.getProperty('sdk.dir')
+        if (sdkDir) {
+            path = sdkDir
+        } else {
+            path = "$System.env.ANDROID_HOME"
+        }
+    } else {
+        path = "$System.env.ANDROID_HOME"
+    }
+
+    def adb = path + "/platform-tools/adb"
+    commandLine "$adb", 'shell', 'am', 'start', '-n', 'com.badlogic.gdx.pay.app/com.badlogic.gdx.pay.app.AndroidLauncher'
+}
+
+// sets up the Android Eclipse project, using the old Ant based build.
+eclipse {
+    // need to specify Java source sets explicitly, SpringSource Gradle Eclipse plugin
+    // ignores any nodes added in classpath.file.withXml
+    sourceSets {
+        main {
+            java.srcDirs "src", 'gen'
+        }
+    }
+
+    jdt {
+        sourceCompatibility = 1.7
+        targetCompatibility = 1.7
+    }
+
+    classpath {
+        plusConfigurations += [project.configurations.compile]
+        containers 'com.android.ide.eclipse.adt.ANDROID_FRAMEWORK', 'com.android.ide.eclipse.adt.LIBRARIES'
+    }
+
+    project {
+        name = appName + "-android"
+        natures 'com.android.ide.eclipse.adt.AndroidNature'
+        buildCommands.clear();
+        buildCommand "com.android.ide.eclipse.adt.ResourceManagerBuilder"
+        buildCommand "com.android.ide.eclipse.adt.PreCompilerBuilder"
+        buildCommand "org.eclipse.jdt.core.javabuilder"
+        buildCommand "com.android.ide.eclipse.adt.ApkBuilder"
+    }
+}
+
+// sets up the Android Idea project, using the old Ant based build.
+idea {
+    module {
+        sourceDirs += file("src");
+        scopes = [COMPILE: [plus: [project.configurations.compile]]]
+
+        iml {
+            withXml {
+                def node = it.asNode()
+                def builder = NodeBuilder.newInstance();
+                builder.current = node;
+                builder.component(name: "FacetManager") {
+                    facet(type: "android", name: "Android") {
+                        configuration {
+                            option(name: "UPDATE_PROPERTY_FILES", value: "true")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
